@@ -101,37 +101,6 @@ class _BaseQFitOptions:
         return self
 
 
-class QFitRotamericResidueOptions(_BaseQFitOptions):
-    def __init__(self):
-        super().__init__()
-
-        # Backbone sampling
-        self.sample_backbone = True
-        self.neighbor_residues_required = 3
-        self.sample_backbone_amplitude = 0.30
-        self.sample_backbone_step = 0.1
-        self.sample_backbone_sigma = 0.125
-
-        # N-CA-CB angle sampling
-        self.sample_angle = True
-        self.sample_angle_range = 7.5
-        self.sample_angle_step = 3.75
-
-        # Rotamer sampling
-        self.sample_rotamers = True
-        self.rotamer_neighborhood = 60
-        self.remove_conformers_below_cutoff = False
-
-        # Anisotropic refinement using phenix
-        self.phenix_aniso = False
-
-        # General settings
-        # Exclude certain atoms always during density and mask creation to
-        # influence QP / MIQP. Provide a list of atom names, e.g. ['N', 'CA']
-        # TODO not implemented
-        self.exclude_atoms = None
-
-
 class _BaseQFit:
     def __init__(self, conformer, structure, xmap, options):
         self.structure = structure
@@ -387,6 +356,37 @@ class _BaseQFit:
         # self._transformer.xmap.array[mask] -= values
         # fname = os.path.join(self.options.directory, f'diff_masked.{ext}')
         # self._transformer.xmap.tofile(fname)
+
+
+class QFitRotamericResidueOptions(_BaseQFitOptions):
+    def __init__(self):
+        super().__init__()
+
+        # Backbone sampling
+        self.sample_backbone = True
+        self.neighbor_residues_required = 3
+        self.sample_backbone_amplitude = 0.30
+        self.sample_backbone_step = 0.1
+        self.sample_backbone_sigma = 0.125
+
+        # N-CA-CB angle sampling
+        self.sample_angle = True
+        self.sample_angle_range = 7.5
+        self.sample_angle_step = 3.75
+
+        # Rotamer sampling
+        self.sample_rotamers = True
+        self.rotamer_neighborhood = 60
+        self.remove_conformers_below_cutoff = False
+
+        # Anisotropic refinement using phenix
+        self.phenix_aniso = False
+
+        # General settings
+        # Exclude certain atoms always during density and mask creation to
+        # influence QP / MIQP. Provide a list of atom names, e.g. ['N', 'CA']
+        # TODO not implemented
+        self.exclude_atoms = None
 
 
 class QFitRotamericResidue(_BaseQFit):
