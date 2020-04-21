@@ -430,7 +430,7 @@ class BondOrder(object):
                     pass
             self._bondorder(n, depth)
 
-class Covalent_Ligand(_BaseStructure):
+class CovalentLigand(_BaseStructure):
 
     """ Covalent Ligand class """
 
