@@ -166,6 +166,8 @@ class XMap(_BaseVolume):
             a, b, c = parser.abc
             alpha, beta, gamma = parser.angles
             spacegroup = parser.spacegroup
+            if spacegroup == 0:
+                raise RuntimeError("File format is 2D image or image stack. Please convert to map.")
             unit_cell = UnitCell(a, b, c, alpha, beta, gamma, spacegroup)
             offset = parser.offset
             array = parser.density
@@ -361,7 +363,7 @@ class CCP4Parser:
         self.angles = tuple(self.header[key] for key in ('alpha', 'beta', 'gamma'))
         self.shape = tuple(self.header[key] for key in ('nx', 'ny', 'nz'))
         self.voxelspacing = tuple(length / n for length, n in zip(self.abc, self.shape))
-        self.spacegroup = int(self.header['ispg'])
+        self.group = int(self.header['ispg'])
         self.cell_shape = [self.header[key] for key in 'nz ny nx'.split()]
         self._get_offset()
         self._get_origin()
