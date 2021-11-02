@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 import numpy as np
 
 from . import MapScaler, Structure, XMap, Covalent_Ligand
-from . import QFitCovalentLigand, QFitCovalentLigandOptions
+from . import QFitCovalentLigand, _BaseQFitOptions
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -107,7 +107,7 @@ def parse_args():
     p.add_argument("-s", "--dihedral-stepsize", type=float, default=10, metavar="<float>",
             help="Stepsize for dihedral angle sampling in degrees.")
     p.add_argument("-rn", "--rotamer-neighborhood", type=float,
-                   default=80, metavar="<float>",
+                   default=60, metavar="<float>",
                    help="Neighborhood of rotamer to sample in degree.")
     p.add_argument("-nl", "--no-ligand",
                    dest="sample_ligand", action="store_false",
@@ -223,7 +223,7 @@ def main():
     receptor = structure.extract(sel_str)
     logger.info("Receptor atoms selected: {natoms}".format(natoms=receptor.natoms))
 
-    options = QFitCovalentLigandOptions()
+    options = _BaseQFitOptions()
     options.apply_command_args(args)
 
     # Load and process the electron density map:

@@ -52,7 +52,7 @@ from .structure.rotamers import ROTAMERS
 
 logger = logging.getLogger(__name__)
 
-
+# Merged _BaseQFitOptions with other classes that were inheriting from the same
 class _BaseQFitOptions:
     def __init__(self):
         # General options
@@ -60,6 +60,7 @@ class _BaseQFitOptions:
         self.verbose = False
         self.debug = False
         self.write_intermediate_conformers = False
+        self.random_seed = None
         self.label = None
         self.map = None
         self.structure = None
@@ -69,7 +70,7 @@ class _BaseQFitOptions:
         self.density_cutoff_value = -1
         self.subtract = True
         self.padding = 8.0
-        self.nowaters = False
+        self.waters_clash = True
 
         # Density creation options
         self.map_type = None
@@ -78,6 +79,7 @@ class _BaseQFitOptions:
         self.scattering = 'xray'
         self.omit = False
         self.scale = True
+        self.scale_rmask = 1.
         self.randomize_b = False
         self.bulk_solvent_level = 0.3
 
@@ -96,17 +98,7 @@ class _BaseQFitOptions:
         self.bic_threshold = True
         self.seg_bic_threshold = True
 
-    def apply_command_args(self, args):
-        for key, value in vars(args).items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-        return self
-
-
-class QFitRotamericResidueOptions(_BaseQFitOptions):
-    def __init__(self):
-        super().__init__()
-
+        #From QFitRotamericResidueOptions
         # Backbone sampling
         self.sample_backbone = True
         self.neighbor_residues_required = 3
@@ -126,12 +118,41 @@ class QFitRotamericResidueOptions(_BaseQFitOptions):
 
         # Anisotropic refinement using phenix
         self.phenix_aniso = False
+   
+        # Additional variables for QFitCovalentLigandOptions
+        # Ligand sampling
+        self.sample_ligand = True
+        self.sample_ligand_stepsize = 8
 
         # General settings
         # Exclude certain atoms always during density and mask creation to
         # influence QP / MIQP. Provide a list of atom names, e.g. ['N', 'CA']
         # TODO not implemented
         self.exclude_atoms = None
+        
+        # From QFitSegmentOptions
+        self.fragment_length = None
+
+        # From QFitLigandOptions
+        self.dofs_per_iteration = 2
+        self.remove_conformers_below_cutoff = False
+        self.local_search = True
+        self.sample_ligand_stepsize = 10
+        self.selection = None
+        self.cif_file = None
+        
+        # From QFitProteinOptions
+        self.nproc = 1
+        self.verbose = True
+        self.omit = False
+        self.checkpoint = False
+        self.pdb = None
+
+    def apply_command_args(self, args):
+        for key, value in vars(args).items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+        return self
 
 
 class _BaseQFit:
@@ -142,6 +163,7 @@ class _BaseQFit:
         self.xmap = xmap
         self.options = options
         self.BIC = np.inf
+        self.prng = np.random.default_rng(self.options.random_seed)
         self._coor_set = [self.conformer.coor]
         self._occupancies = [1.0]
         self._bs = [self.conformer.b]
@@ -201,7 +223,7 @@ class _BaseQFit:
     def _subtract_transformer(self, residue, structure):
         # Select the atoms whose density we are going to subtract:
         subtract_structure = structure.extract_neighbors(residue, self.options.padding)
-        if self.options.nowaters:
+        if not self.options.waters_clash:
             subtract_structure = subtract_structure.extract("resn", "HOH", "!=")
 
         # Calculate the density that we are going to subtract:
@@ -270,7 +292,7 @@ class _BaseQFit:
         bs_copy = copy.deepcopy(bs)
         if self.options.randomize_b:
             mask = np.in1d(self.conformer.name, atoms)
-            add = 0.2 * np.random.rand(bs_copy[mask].shape[0]) - 0.1
+            add = 0.2 * self.prng.random(bs_copy[mask].shape[0]) - 0.1
             bs_copy[mask] += np.multiply(bs[mask], add)
         return bs_copy
 
@@ -740,7 +762,7 @@ class QFitRotamericResidue(_BaseQFit):
         start_coor = atom.coor[0]  # We are working on a single atom.
         torsion_solutions = []
         for amplitude, direction in itertools.product(amplitudes, directions):
-            delta = np.random.uniform(-sigma, sigma)
+            delta = self.prng.uniform(-sigma, sigma)
             endpoint = start_coor + (amplitude + delta) * direction
             optimize_result = optimizer.optimize(atom_name, endpoint)
             torsion_solutions.append(optimize_result['x'])
@@ -1014,12 +1036,6 @@ class QFitRotamericResidue(_BaseQFit):
         mc_residue.tofile(fname)
 
 
-class QFitSegmentOptions(_BaseQFitOptions):
-    def __init__(self):
-        super().__init__()
-        self.fragment_length = None
-
-
 class QFitSegment(_BaseQFit):
     """Determines consistent protein segments based on occupancy and
        density fit"""
@@ -1157,7 +1173,10 @@ class QFitSegment(_BaseQFit):
         multiconformers = multiconformers.remove_identical_conformers(self.options.rmsd_cutoff)
         logger.info(f"Average number of conformers after removal of identical conformers: "
                     f"{multiconformers.average_conformers():.2f}")
+
+        # Build an instance of Relabeller
         relab_options = RelabellerOptions()
+        relab_options.apply_command_args(self.options)  # Update RelabellerOptions with QFitSegmentOptions
         relabeller = Relabeller(multiconformers, relab_options)
         multiconformers = relabeller.run()
         multiconformers = multiconformers.combine(hetatms)
@@ -1235,10 +1254,6 @@ class QFitSegment(_BaseQFit):
                     # coor.append(fragment.coor[i])
             logger.info(f"Path {k+1}:\t{path}\t{fragment.q[-1]}")
 
-
-class QFitLigandOptions(_BaseQFitOptions):
-    def __init__(self):
-        super().__init__()
 
         self.dofs_per_iteration = 2
         self.remove_conformers_below_cutoff = False
@@ -1366,7 +1381,7 @@ class QFitLigand(_BaseQFit):
                         if not self._cd() and not self.ligand.clashes():
                             if new_coor_set:
                                 delta = np.array(new_coor_set) - np.array(new_coor)
-                                if np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1))) >= 0.01:
+                                if np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1))) >= self.options.rmsd_cutoff:
                                     new_coor_set.append(new_coor)
                                     new_bs.append(b)
                             else:
@@ -1375,7 +1390,7 @@ class QFitLigand(_BaseQFit):
                     elif not self.ligand.clashes():
                         if new_coor_set:
                             delta = np.array(new_coor_set) - np.array(new_coor)
-                            if np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1))) >= 0.01:
+                            if np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1))) >= self.options.rmsd_cutoff:
                                 new_coor_set.append(new_coor)
                                 new_bs.append(b)
                         else:
@@ -1465,7 +1480,7 @@ class QFitLigand(_BaseQFit):
                             if not self._cd() and not self.ligand.clashes():
                                 if new_coor_set:
                                     delta = np.array(new_coor_set) - np.array(new_coor)
-                                    if np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1))) >= 0.01:
+                                    if np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1))) >= self.options.rmsd_cutoff:
                                         new_coor_set.append(new_coor)
                                         new_bs.append(b)
                                 else:
@@ -1474,7 +1489,7 @@ class QFitLigand(_BaseQFit):
                         elif not self.ligand.clashes():
                             if new_coor_set:
                                 delta = np.array(new_coor_set) - np.array(new_coor)
-                                if np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1))) >= 0.01:
+                                if np.sqrt(min(np.square((delta)).sum(axis=2).sum(axis=1))) >= self.options.rmsd_cutoff:
                                     new_coor_set.append(new_coor)
                                     new_bs.append(b)
                             else:
@@ -1534,32 +1549,6 @@ class QFitLigand(_BaseQFit):
             else:
                 starting_bond_index += self.options.dofs_per_iteration
             iteration += 1
-
-
-class QFitCovalentLigandOptions(_BaseQFitOptions):
-    def __init__(self):
-        super().__init__()
-
-        # Backbone sampling
-        self.sample_backbone = True
-        self.neighbor_residues_required = 3
-        self.sample_backbone_amplitude = 0.30
-        self.sample_backbone_step = 0.1
-        self.sample_backbone_sigma = 0.125
-
-        # N-CA-CB angle sampling
-        self.sample_angle = True
-        self.sample_angle_range = 7.5
-        self.sample_angle_step = 3.75
-
-        # Rotamer sampling
-        self.sample_rotamers = True
-        self.rotamer_neighborhood = 80
-        self.remove_conformers_below_cutoff = False
-
-        # Ligand sampling
-        self.sample_ligand = True
-        self.sample_ligand_stepsize = 8
 
 
 class QFitCovalentLigand(_BaseQFit):
@@ -1729,11 +1718,11 @@ class QFitCovalentLigand(_BaseQFit):
         sigma = self.options.sample_backbone_sigma
 
         for amplitude, direction in itertools.product(amplitudes, directions):
-            endpoint = start_coor + (amplitude + sigma * np.random.random()) * direction
+            endpoint = start_coor + (amplitude + sigma * self.prng.random()) * direction
             optimize_result = optimizer.optimize(atom_name, endpoint)
             torsion_solutions.append(optimize_result['x'])
 
-            endpoint = start_coor - (amplitude + sigma * np.random.random()) * direction
+            endpoint = start_coor - (amplitude + sigma * self.prng.random()) * direction
             optimize_result = optimizer.optimize(atom_name, endpoint)
             torsion_solutions.append(optimize_result['x'])
 
